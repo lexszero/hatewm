@@ -39,21 +39,8 @@ struct Monitor {
 enum { NetSupported, NetWMName, NetLast };              /* EWMH atoms */
 enum { WMProtocols, WMDelete, WMState, WMLast };        /* default atoms */
 static Atom wmatom[WMLast], netatom[NetLast];
-/*
-static void (*handler[LASTEvent]) (XEvent *) = {
-	[ConfigureRequest] = configurerequest,
-	[ConfigureNotify] = configurenotify,
-	[DestroyNotify] = destroynotify,
-	[EnterNotify] = enternotify,
-	[Expose] = expose,
-	[FocusIn] = focusin,
-	[MappingNotify] = mappingnotify,
-	[MapRequest] = maprequest,
-	[PropertyNotify] = propertynotify,
-	[UnmapNotify] = unmapnotify
-};
-*/
-static char (*handler[LASTEvent]) = {
+
+static char *evtype[LASTEvent] = {
 	[ConfigureRequest] = "configurerequest",
 	[ConfigureNotify] = "configurenotify",
 	[DestroyNotify] = "destroynotify",
@@ -88,7 +75,7 @@ void checkotherwm(void) {
 	/* this causes an error if some other window manager is running */
 	XSync(dpy, false);
 	if(otherwm)
-		die("dwm: another window manager is already running\n");
+		die("another window manager is already running\n");
 	XSetErrorHandler(xerror);
 	XSync(dpy, false);
 }
@@ -127,6 +114,7 @@ void init(void) {
 	sw = DisplayWidth(dpy, screen);
 	sh = DisplayHeight(dpy, screen);
 	
+	DPRINTF("Root: %x\n", root);
 	m.num = 0;
 	m.x = 0;
 	m.y = 0;
@@ -145,7 +133,6 @@ void init(void) {
 	wa.event_mask = SubstructureRedirectMask|SubstructureNotifyMask|ButtonPressMask
 	                |EnterWindowMask|LeaveWindowMask|StructureNotifyMask
 	                |PropertyChangeMask;
-//	XChangeWindowAttributes(dpy, root, CWEventMask|CWCursor, &wa);
 	XSelectInput(dpy, root, wa.event_mask);
 }
 
@@ -166,6 +153,21 @@ void addwindow(Window w) {
 	c->mon = &m; // temp
 	c->next = m.clients;
 	m.clients = c;
+	// need to throw ConfigureRequest to our listeners for each window
+}
+
+int xeventtostr(XEvent *ev, char *str, size_t len) {
+	switch (ev->type) {
+		case (ConfigureRequest): 
+				{
+					XConfigureRequestEvent e = ev->xconfigurerequest;
+					return snprintf(str, len, "%s %x %i %i %i %i\n", evtype[ev->type], (int) e.window, e.x, e.y, e.width, e.height);
+					break;
+				}
+		default:
+				return snprintf(str, len, "%s\n", evtype[ev->type]);
+	}
+	return 0;
 }
 
 void scan(void) {
@@ -184,11 +186,14 @@ void scan(void) {
 void run() {
 	XEvent ev;
 	XSync(dpy, False);
+	char *str = malloc(1024);
 	while(running && !XNextEvent(dpy, &ev)) {
-		if(handler[ev.type])
-			DPRINTF("Event Type: %x %s\n", ev.type, handler[ev.type]);
-
+		if(evtype[ev.type]) {
+			xeventtostr(&ev, str, 1024);
+			DPRINTF("%s", str);
+		}
 	}
+	free(str);
 }
 
 int xerrorstart(Display *dpy, XErrorEvent *ee) {
@@ -207,13 +212,13 @@ int xerror(Display *dpy, XErrorEvent *ee) {
 	|| (ee->request_code == X_GrabKey && ee->error_code == BadAccess)
 	|| (ee->request_code == X_CopyArea && ee->error_code == BadDrawable))
 		return 0;
-	fprintf(stderr, "dwm: fatal error: request code=%d, error code=%d\n", ee->request_code, ee->error_code);
+	fprintf(stderr, "fatal error: request code=%d, error code=%d\n", ee->request_code, ee->error_code);
 	return xerrorxlib(dpy, ee); /* may call exit */
 }
 
 int main(int argc, char **argv) {
 	if(!(dpy = XOpenDisplay(NULL)))
-		die("dwm: cannot open display\n");
+		die("cannot open display\n");
 	checkotherwm();
 	init();
 	scan();
