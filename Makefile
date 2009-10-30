@@ -8,3 +8,7 @@ LDFLAGS = -s ${LIBS}
 all: hatewm
 
 hatewm: hatewm.o
+
+clean:
+	rm *.o
+	rm hatewm

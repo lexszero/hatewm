@@ -15,6 +15,8 @@
 #include <X11/Xproto.h>
 #include <X11/Xutil.h>
 
+#define DEBUG		1
+#define DPRINTF 	if (DEBUG) printf
 
 typedef struct Client Client;
 typedef struct Monitor Monitor;
@@ -37,6 +39,32 @@ struct Monitor {
 enum { NetSupported, NetWMName, NetLast };              /* EWMH atoms */
 enum { WMProtocols, WMDelete, WMState, WMLast };        /* default atoms */
 static Atom wmatom[WMLast], netatom[NetLast];
+/*
+static void (*handler[LASTEvent]) (XEvent *) = {
+	[ConfigureRequest] = configurerequest,
+	[ConfigureNotify] = configurenotify,
+	[DestroyNotify] = destroynotify,
+	[EnterNotify] = enternotify,
+	[Expose] = expose,
+	[FocusIn] = focusin,
+	[MappingNotify] = mappingnotify,
+	[MapRequest] = maprequest,
+	[PropertyNotify] = propertynotify,
+	[UnmapNotify] = unmapnotify
+};
+*/
+static char (*handler[LASTEvent]) = {
+	[ConfigureRequest] = "configurerequest",
+	[ConfigureNotify] = "configurenotify",
+	[DestroyNotify] = "destroynotify",
+	[EnterNotify] = "enternotify",
+	[Expose] = "expose",
+	[FocusIn] = "focusin",
+	[MappingNotify] = "mappingnotify",
+	[MapRequest] = "maprequest",
+	[PropertyNotify] = "propertynotify",
+	[UnmapNotify] = "unmapnotify"
+};
 
 static Display *dpy;
 static int (*xerrorxlib)(Display *, XErrorEvent *);
@@ -45,7 +73,7 @@ static Window root;
 static int sw, sh;           /* X display screen geometry width, height */
 Monitor m;
 static int screen;
-bool otherwm = false;
+bool otherwm = false, running = true;
 
 static void checkotherwm(void);
 static void die(const char *errstr, ...);
@@ -117,42 +145,49 @@ void init(void) {
 	wa.event_mask = SubstructureRedirectMask|SubstructureNotifyMask|ButtonPressMask
 	                |EnterWindowMask|LeaveWindowMask|StructureNotifyMask
 	                |PropertyChangeMask;
+//	XChangeWindowAttributes(dpy, root, CWEventMask|CWCursor, &wa);
+	XSelectInput(dpy, root, wa.event_mask);
 }
 
-void addwindow(Window w, XWindowAttributes *wa) {
+void addwindow(Window w) {
+	XWindowAttributes wa;
+	
+	if (!XGetWindowAttributes(dpy, w, &wa) || ! ((wa.map_state == IsViewable || getstate(w) == IconicState)))
+		return;
+	
 	Client *c = malloc(sizeof(Client));
 	c->win = w;
-	c->x = wa->x;
-	c->y = wa->y;
-	c->w = wa->width;
-	c->h = wa->height;
-	printf("%x %i %i %i %i\n", c->win, c->x, c->y, c->w, c->h);
+	c->x = wa.x;
+	c->y = wa.y;
+	c->w = wa.width;
+	c->h = wa.height;
+	DPRINTF("%x %i %i %i %i\n", c->win, c->x, c->y, c->w, c->h);
+	
+	c->mon = &m; // temp
+	c->next = m.clients;
+	m.clients = c;
 }
 
 void scan(void) {
 	unsigned int i, num;
 	Window d1, d2, *wins = NULL;
-	XWindowAttributes wa;
 	
 	// Initially get all windows
 	if(XQueryTree(dpy, root, &d1, &d2, &wins, &num)) {
-		for(i = 0; i < num; i++) {
-			if(!XGetWindowAttributes(dpy, wins[i], &wa)
-			|| wa.override_redirect || XGetTransientForHint(dpy, wins[i], &d1))
-				continue;
-			if(wa.map_state == IsViewable || getstate(wins[i]) == IconicState) {
-				addwindow(wins[i], &wa);
-			}
-		}
- 		for(i = 0; i < num; i++) {
-			if(!XGetWindowAttributes(dpy, wins[i], &wa))
-				continue;
-			if(XGetTransientForHint(dpy, wins[i], &d1)
-			&& (wa.map_state == IsViewable || getstate(wins[i]) == IconicState))
-				addwindow(wins[i], &wa);
-		}
+		for(i = 0; i < num; i++)
+			addwindow(wins[i]);
 		if(wins)
 			XFree(wins);
+	}
+}
+
+void run() {
+	XEvent ev;
+	XSync(dpy, False);
+	while(running && !XNextEvent(dpy, &ev)) {
+		if(handler[ev.type])
+			DPRINTF("Event Type: %x %s\n", ev.type, handler[ev.type]);
+
 	}
 }
 
@@ -182,4 +217,5 @@ int main(int argc, char **argv) {
 	checkotherwm();
 	init();
 	scan();
+	run();
 }
