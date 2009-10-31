@@ -15,8 +15,8 @@
 #include <X11/Xproto.h>
 #include <X11/Xutil.h>
 
-#define DEBUG		1
-#define DPRINTF 	if (DEBUG) printf
+#define DEBUG					1
+#define DPRINTF 				if (DEBUG) printf
 
 typedef struct Client Client;
 typedef struct Monitor Monitor;
@@ -39,20 +39,6 @@ struct Monitor {
 enum { NetSupported, NetWMName, NetLast };              /* EWMH atoms */
 enum { WMProtocols, WMDelete, WMState, WMLast };        /* default atoms */
 static Atom wmatom[WMLast], netatom[NetLast];
-
-static char *evtype[LASTEvent] = {
-	[ConfigureRequest] = "configurerequest",
-	[ConfigureNotify] = "configurenotify",
-	[DestroyNotify] = "destroynotify",
-	[EnterNotify] = "enternotify",
-	[Expose] = "expose",
-	[FocusIn] = "focusin",
-	[MappingNotify] = "mappingnotify",
-	[MapRequest] = "maprequest",
-	[PropertyNotify] = "propertynotify",
-	[UnmapNotify] = "unmapnotify"
-};
-
 static Display *dpy;
 static int (*xerrorxlib)(Display *, XErrorEvent *);
 static Window root;
@@ -62,13 +48,44 @@ Monitor m;
 static int screen;
 bool otherwm = false, running = true;
 
+static void addwindow(Window w);
 static void checkotherwm(void);
 static void die(const char *errstr, ...);
+static void eventf(const char *fmt, ...);
 static long getstate(Window w);
 static void init(void);
 static void scan(void);
 static int xerror(Display *dpy, XErrorEvent *ee);
 static int xerrorstart(Display *dpy, XErrorEvent *ee);
+
+void h_configurerequest(XEvent *e);
+void h_configurenotify(XEvent *e);
+void h_destroynotify(XEvent *e);
+
+static void (*handler[LASTEvent]) (XEvent *) = {
+//	[ButtonPress] = buttonpress,
+	[ConfigureRequest] = h_configurerequest,
+	[ConfigureNotify] = h_configurenotify,
+	[DestroyNotify] = h_destroynotify,
+//	[EnterNotify] = enternotify,
+//	[Expose] = expose,
+//	[FocusIn] = focusin,
+//	[MappingNotify] = mappingnotify,
+//	[MapRequest] = maprequest,
+//	[PropertyNotify] = propertynotify,
+//	[UnmapNotify] = unmapnotify
+
+};
+
+void eventf(const char *fmt, ...) {
+	int size = 1000;
+	char *str = malloc(size);
+	va_list ap;
+	va_start(ap, fmt);
+	vsnprintf(str, size, fmt, ap);
+	printf("%s", str);
+	free(str);
+}
 
 void checkotherwm(void) {
 	xerrorxlib = XSetErrorHandler(xerrorstart);
@@ -114,7 +131,7 @@ void init(void) {
 	sw = DisplayWidth(dpy, screen);
 	sh = DisplayHeight(dpy, screen);
 	
-	DPRINTF("Root: %x\n", root);
+	DPRINTF("Root: %i\n", root);
 	m.num = 0;
 	m.x = 0;
 	m.y = 0;
@@ -138,7 +155,6 @@ void init(void) {
 
 void addwindow(Window w) {
 	XWindowAttributes wa;
-	
 	if (!XGetWindowAttributes(dpy, w, &wa) || ! ((wa.map_state == IsViewable || getstate(w) == IconicState)))
 		return;
 	
@@ -148,27 +164,37 @@ void addwindow(Window w) {
 	c->y = wa.y;
 	c->w = wa.width;
 	c->h = wa.height;
-	DPRINTF("%x %i %i %i %i\n", c->win, c->x, c->y, c->w, c->h);
 	
 	c->mon = &m; // temp
 	c->next = m.clients;
 	m.clients = c;
+	
+	
 	// need to throw ConfigureRequest to our listeners for each window
 }
 
-int xeventtostr(XEvent *ev, char *str, size_t len) {
-	switch (ev->type) {
-		case (ConfigureRequest): 
-				{
-					XConfigureRequestEvent e = ev->xconfigurerequest;
-					return snprintf(str, len, "%s %x %i %i %i %i\n", evtype[ev->type], (int) e.window, e.x, e.y, e.width, e.height);
-					break;
-				}
+/* was xeventtostr
+int xeventtostr(XEvent *e, char *str, size_t len) {
+	XAnyEvent ae = e->xany;
+	switch (e->type) {
+		case ConfigureRequest:
+				return snprintf(str, len, "%s %i %i %i %i %i\n", 
+						evtype[e->type], 
+						(int) ae.window, 
+						e->xconfigurerequest.x, 
+						e->xconfigurerequest.y, 
+						e->xconfigurerequest.width, 
+						e->xconfigurerequest.height);
+				break;
+		
 		default:
-				return snprintf(str, len, "%s\n", evtype[ev->type]);
+				return snprintf(str, len, "%s %i\n", 
+						evtype[e->type], 
+						(int) ae.window);
 	}
 	return 0;
 }
+*/
 
 void scan(void) {
 	unsigned int i, num;
@@ -186,14 +212,10 @@ void scan(void) {
 void run() {
 	XEvent ev;
 	XSync(dpy, False);
-	char *str = malloc(1024);
 	while(running && !XNextEvent(dpy, &ev)) {
-		if(evtype[ev.type]) {
-			xeventtostr(&ev, str, 1024);
-			DPRINTF("%s", str);
-		}
+		if(handler[ev.type]) 
+			 handler[ev.type](&ev);		
 	}
-	free(str);
 }
 
 int xerrorstart(Display *dpy, XErrorEvent *ee) {
@@ -214,6 +236,48 @@ int xerror(Display *dpy, XErrorEvent *ee) {
 		return 0;
 	fprintf(stderr, "fatal error: request code=%d, error code=%d\n", ee->request_code, ee->error_code);
 	return xerrorxlib(dpy, ee); /* may call exit */
+}
+
+void h_configurerequest(XEvent *e) {
+	XConfigureRequestEvent *ev = &e->xconfigurerequest;
+	XConfigureEvent ce;
+	ce.type = ConfigureNotify;
+	ce.display = dpy;
+	ce.event = ev->window;
+	ce.window = ev->window;
+	ce.x = 100;
+	ce.y = 100;
+	ce.width = 200;
+	ce.height = 200;
+//	ce.border_width = c->bw;
+	ce.above = None;
+	ce.override_redirect = False;
+	XSendEvent(dpy, ev->window, False, StructureNotifyMask, (XEvent *)&ce);
+
+	XSelectInput(dpy, ev->window, EnterWindowMask|FocusChangeMask|PropertyChangeMask|StructureNotifyMask);
+
+	eventf("configurerequest %i %i %i %i %i\n", 
+			(int) ((ev->window == root) ? 0 : ev->window),
+			ev->x, 
+			ev->y, 
+			ev->width, 
+			ev->height);
+}
+
+void h_configurenotify(XEvent *e) {
+	XConfigureEvent *ev = &e->xconfigure;
+	eventf("configurenotify %i %i %i %i %i\n", 
+			(int) ((ev->window == root) ? 0 : ev->window),
+			ev->x, 
+			ev->y, 
+			ev->width, 
+			ev->height);
+
+}
+
+void h_destroynotify(XEvent *e) {
+	eventf("destroyenotify %i\n",
+			(int) e->xdestroywindow.event);
 }
 
 int main(int argc, char **argv) {
